@@ -3,6 +3,7 @@ import { VoxelCanvas } from './VoxelCanvas';
 import { Hotbar } from './Hotbar';
 import { BlockInventory } from './BlockInventory';
 import { EditorControls } from './EditorControls';
+import { DebugPanel } from './DebugPanel';
 import { useVoxelWorld } from '@/hooks/useVoxelWorld';
 import { BLOCK_REGISTRY, BlockDefinition, exportWorldToJSON, importWorldFromJSON } from '@/data/blockRegistry';
 import { toast } from 'sonner';
@@ -28,6 +29,14 @@ export function VoxelEditor() {
   const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('orbit');
   const [showGrid, setShowGrid] = useState(true);
   
+  // Add debug state
+  const [debugInfo, setDebugInfo] = useState({
+    fps: 0,
+    triangles: 0,
+    geometries: 0,
+    cameraPosition: { x: 0, y: 0, z: 0 }
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedBlockId = hotbarSlots[selectedHotbarIndex];
@@ -149,6 +158,7 @@ export function VoxelEditor() {
         cameraMode={cameraMode}
         onPlaceBlock={handlePlaceBlock}
         onRemoveBlock={handleRemoveBlock}
+        onDebugInfoUpdate={setDebugInfo} // Add this prop
       />
 
       {/* Editor Controls */}
@@ -162,6 +172,11 @@ export function VoxelEditor() {
         onImport={handleImport}
         onClear={handleClear}
       />
+
+      {/* Debug Panel - Add this */}
+      <div className="fixed top-5 right-4 z-40">
+        <DebugPanel debugInfo={debugInfo} />
+      </div>
 
       {/* Hotbar */}
       <Hotbar

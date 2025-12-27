@@ -85,7 +85,7 @@ export function EditorControls({
       </div>
 
       {/* Top Right - File Operations */}
-      <div className="fixed top-4 right-4 z-40 flex flex-col gap-2">
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2">
         <button onClick={onExport} className="editor-button-primary flex items-center gap-2">
           <Download className="w-4 h-4" />
           <span className="text-sm">Export JSON</span>

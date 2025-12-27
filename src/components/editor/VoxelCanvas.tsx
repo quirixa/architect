@@ -12,6 +12,18 @@ interface VoxelCanvasProps {
   cameraMode: 'fps' | 'orbit';
   onPlaceBlock: (x: number, y: number, z: number) => void;
   onRemoveBlock: (x: number, y: number, z: number) => void;
+  onDebugInfoUpdate?: (info: DebugInfo) => void;
+}
+
+export interface DebugInfo {
+  fps: number;
+  triangles: number;
+  geometries: number;
+  cameraPosition: {
+    x: number;
+    y: number;
+    z: number;
+  };
 }
 
 const WORLD_SIZE = 64;
@@ -27,6 +39,7 @@ export function VoxelCanvas({
   cameraMode,
   onPlaceBlock,
   onRemoveBlock,
+  onDebugInfoUpdate,
 }: VoxelCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -46,7 +59,15 @@ export function VoxelCanvas({
   const isMouseDownRef = useRef(false);
   const lastPlacedRef = useRef<string | null>(null);
   
-  // FPS camera state - separate yaw and pitch
+  // Debug info refs
+  const frameCountRef = useRef(0);
+  const lastFPSUpdateRef = useRef(0);
+  const fpsRef = useRef(0);
+  const triangleCountRef = useRef(0);
+  const geometryCountRef = useRef(0);
+  const lastDebugUpdateRef = useRef(0);
+  
+  // FPS camera state
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
   const moveStateRef = useRef({
@@ -58,6 +79,110 @@ export function VoxelCanvas({
     down: false,
   });
   const velocityRef = useRef(new THREE.Vector3());
+
+  // Get intersection for FPS mode - MOVED TO TOP
+  const getFPSIntersection = useCallback(() => {
+    if (!sceneRef.current || !cameraRef.current) return null;
+
+    const raycaster = new THREE.Raycaster();
+    const camera = cameraRef.current;
+    
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(camera.quaternion);
+    raycaster.set(camera.position, direction);
+
+    const objects = sceneRef.current.children.filter(
+      obj => obj.name === 'block' || obj.name === 'ground'
+    );
+    const intersects = raycaster.intersectObjects(objects, false);
+
+    if (intersects.length > 0) {
+      const intersect = intersects[0];
+      const point = intersect.point.clone();
+      const normal = intersect.face?.normal.clone() || new THREE.Vector3(0, 1, 0);
+      
+      let gridX: number, gridY: number, gridZ: number;
+      
+      if (intersect.object.name === 'ground') {
+        gridX = Math.floor(point.x + WORLD_SIZE / 2);
+        gridY = 0;
+        gridZ = Math.floor(point.z + WORLD_SIZE / 2);
+      } else {
+        const pos = intersect.object.position.clone();
+        normal.transformDirection(intersect.object.matrixWorld);
+        
+        gridX = Math.floor(pos.x + normal.x + WORLD_SIZE / 2);
+        gridY = Math.floor(pos.y + normal.y - 0.5);
+        gridZ = Math.floor(pos.z + normal.z + WORLD_SIZE / 2);
+      }
+
+      return { 
+        gridX, 
+        gridY, 
+        gridZ, 
+        isBlock: intersect.object.name === 'block',
+        blockKey: intersect.object.userData.blockKey,
+      };
+    }
+
+    return null;
+  }, []);
+
+  // Collect debug information
+  const collectDebugInfo = useCallback((): DebugInfo => {
+    let triangles = 0;
+    let geometries = new Set<string>();
+    
+    if (sceneRef.current) {
+      sceneRef.current.traverse((object) => {
+        if (object instanceof THREE.Mesh && object.geometry) {
+          if (object.geometry.index) {
+            triangles += object.geometry.index.count / 3;
+          } else {
+            triangles += object.geometry.attributes.position.count / 3;
+          }
+          geometries.add(object.geometry.uuid);
+        }
+      });
+    }
+    
+    const cameraPos = cameraRef.current?.position.clone() || new THREE.Vector3();
+    
+    return {
+      fps: fpsRef.current,
+      triangles,
+      geometries: geometries.size,
+      cameraPosition: {
+        x: cameraPos.x,
+        y: cameraPos.y,
+        z: cameraPos.z
+      }
+    };
+  }, []);
+
+  // Update debug info
+  const updateDebugInfo = useCallback(() => {
+    const now = performance.now();
+    frameCountRef.current++;
+    
+    // Update FPS every second
+    if (now - lastFPSUpdateRef.current >= 1000) {
+      fpsRef.current = frameCountRef.current;
+      frameCountRef.current = 0;
+      lastFPSUpdateRef.current = now;
+      
+      // Collect other debug info
+      triangleCountRef.current = collectDebugInfo().triangles;
+      geometryCountRef.current = collectDebugInfo().geometries;
+    }
+    
+    // Send debug update to parent every 500ms
+    if (onDebugInfoUpdate && now - lastDebugUpdateRef.current >= 500) {
+      const info = collectDebugInfo();
+      onDebugInfoUpdate(info);
+      lastDebugUpdateRef.current = now;
+    }
+  }, [collectDebugInfo, onDebugInfoUpdate]);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -180,42 +305,35 @@ export function VoxelCanvas({
       if (currentMode === 'orbit') {
         controls.update();
       } else if (isPointerLockedRef.current) {
-        // FPS movement - only when pointer is locked
+        // FPS movement
         const move = moveStateRef.current;
         
-        // Calculate forward direction from yaw only (ignores pitch for movement)
         const yaw = yawRef.current;
         const forwardX = -Math.sin(yaw);
         const forwardZ = -Math.cos(yaw);
         const rightX = Math.cos(yaw);
         const rightZ = -Math.sin(yaw);
         
-        // Calculate movement input
         const inputZ = Number(move.forward) - Number(move.backward);
         const inputX = Number(move.right) - Number(move.left);
         const inputY = Number(move.up) - Number(move.down);
         
-        // Apply movement relative to yaw direction
         const moveX = forwardX * inputZ + rightX * inputX;
         const moveZ = forwardZ * inputZ + rightZ * inputX;
         
-        // Apply velocity with damping
         velocityRef.current.x += moveX * FPS_MOVE_SPEED * delta;
         velocityRef.current.z += moveZ * FPS_MOVE_SPEED * delta;
         velocityRef.current.y += inputY * FPS_MOVE_SPEED * delta;
         
-        // Damping
         const damping = Math.exp(-8 * delta);
         velocityRef.current.x *= damping;
         velocityRef.current.z *= damping;
         velocityRef.current.y *= damping;
         
-        // Apply position
         camera.position.x += velocityRef.current.x;
         camera.position.z += velocityRef.current.z;
         camera.position.y += velocityRef.current.y;
         
-        // Apply yaw and pitch rotation
         camera.rotation.order = 'YXZ';
         camera.rotation.y = yawRef.current;
         camera.rotation.x = pitchRef.current;
@@ -237,6 +355,9 @@ export function VoxelCanvas({
         }
       }
       
+      // Update debug info
+      updateDebugInfo();
+      
       renderer.render(scene, camera);
     };
     animate();
@@ -250,59 +371,7 @@ export function VoxelCanvas({
       }
       renderer.dispose();
     };
-  }, []);
-
-  // Get intersection for FPS mode (center of screen)
-  const getFPSIntersection = useCallback(() => {
-    if (!sceneRef.current || !cameraRef.current) return null;
-
-    // Raycast from center of screen for FPS mode
-    const raycaster = new THREE.Raycaster();
-    const camera = cameraRef.current;
-    
-    // Cast ray from camera position forward
-    const direction = new THREE.Vector3(0, 0, -1);
-    direction.applyQuaternion(camera.quaternion);
-    raycaster.set(camera.position, direction);
-
-    const objects = sceneRef.current.children.filter(
-      obj => obj.name === 'block' || obj.name === 'ground'
-    );
-    const intersects = raycaster.intersectObjects(objects, false);
-
-    if (intersects.length > 0) {
-      const intersect = intersects[0];
-      const point = intersect.point.clone();
-      const normal = intersect.face?.normal.clone() || new THREE.Vector3(0, 1, 0);
-      
-      // Calculate grid position
-      let gridX: number, gridY: number, gridZ: number;
-      
-      if (intersect.object.name === 'ground') {
-        gridX = Math.floor(point.x + WORLD_SIZE / 2);
-        gridY = 0;
-        gridZ = Math.floor(point.z + WORLD_SIZE / 2);
-      } else {
-        // Place on face of existing block
-        const pos = intersect.object.position.clone();
-        normal.transformDirection(intersect.object.matrixWorld);
-        
-        gridX = Math.floor(pos.x + normal.x + WORLD_SIZE / 2);
-        gridY = Math.floor(pos.y + normal.y - 0.5);
-        gridZ = Math.floor(pos.z + normal.z + WORLD_SIZE / 2);
-      }
-
-      return { 
-        gridX, 
-        gridY, 
-        gridZ, 
-        isBlock: intersect.object.name === 'block',
-        blockKey: intersect.object.userData.blockKey,
-      };
-    }
-
-    return null;
-  }, []);
+  }, [selectedBlockId, getFPSIntersection, updateDebugInfo]);
 
   // Handle FPS mouse click
   const handleFPSMouseDown = useCallback((event: MouseEvent) => {
@@ -310,9 +379,9 @@ export function VoxelCanvas({
     
     const intersection = getFPSIntersection();
     
-    if (event.button === 0 && intersection) { // Left click - place
+    if (event.button === 0 && intersection) {
       onPlaceBlock(intersection.gridX, intersection.gridY, intersection.gridZ);
-    } else if (event.button === 2 && intersection && intersection.isBlock) { // Right click - remove
+    } else if (event.button === 2 && intersection && intersection.isBlock) {
       const [x, y, z] = keyToPosition(intersection.blockKey);
       onRemoveBlock(x, y, z);
     }
@@ -328,28 +397,22 @@ export function VoxelCanvas({
     const camera = cameraRef.current;
     
     if (cameraMode === 'orbit') {
-      // Enable orbit controls
       controls.enabled = true;
       
-      // Exit pointer lock if active
       if (document.pointerLockElement) {
         document.exitPointerLock();
       }
       
-      // Show preview mesh
       if (previewMeshRef.current) {
         previewMeshRef.current.visible = false;
       }
     } else {
-      // Disable orbit controls entirely in FPS mode
       controls.enabled = false;
       
-      // Initialize yaw/pitch from current camera rotation
       const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
       yawRef.current = euler.y;
       pitchRef.current = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
       
-      // Reset velocity
       velocityRef.current.set(0, 0, 0);
     }
   }, [cameraMode]);
@@ -378,7 +441,6 @@ export function VoxelCanvas({
       if (!block) return;
 
       if (!currentMeshes.has(key)) {
-        // Create new block mesh
         const geometry = new THREE.BoxGeometry(GRID_SIZE, GRID_SIZE, GRID_SIZE);
         const material = new THREE.MeshStandardMaterial({
           color: block.texture,
@@ -435,7 +497,6 @@ export function VoxelCanvas({
       const point = intersect.point.clone();
       const normal = intersect.face?.normal.clone() || new THREE.Vector3(0, 1, 0);
       
-      // Calculate grid position
       let gridX: number, gridY: number, gridZ: number;
       
       if (intersect.object.name === 'ground') {
@@ -443,7 +504,6 @@ export function VoxelCanvas({
         gridY = 0;
         gridZ = Math.floor(point.z + WORLD_SIZE / 2);
       } else {
-        // Place on face of existing block
         const pos = intersect.object.position.clone();
         normal.transformDirection(intersect.object.matrixWorld);
         
@@ -466,7 +526,6 @@ export function VoxelCanvas({
 
   // Handle mouse move for preview - orbit mode only
   const handleMouseMove = useCallback((event: MouseEvent) => {
-    // Only handle in orbit mode
     if (cameraModeRef.current !== 'orbit') return;
     
     const intersection = getIntersection(event);
@@ -479,7 +538,6 @@ export function VoxelCanvas({
         intersection.gridZ - WORLD_SIZE / 2 + 0.5
       );
 
-      // Handle drag placement
       if (isMouseDownRef.current && event.buttons === 1) {
         const key = `${intersection.gridX},${intersection.gridY},${intersection.gridZ}`;
         if (key !== lastPlacedRef.current) {
@@ -494,7 +552,6 @@ export function VoxelCanvas({
 
   // Handle mouse down - orbit mode only
   const handleMouseDown = useCallback((event: MouseEvent) => {
-    // Only handle in orbit mode
     if (cameraModeRef.current !== 'orbit') return;
     
     if (event.button === 0) {
@@ -529,14 +586,12 @@ export function VoxelCanvas({
     }
   }, [cameraMode]);
 
-  // FPS mouse look - only when pointer locked
+  // FPS mouse look
   const handlePointerLockMove = useCallback((event: MouseEvent) => {
     if (!isPointerLockedRef.current) return;
     
-    // Update yaw (horizontal rotation)
     yawRef.current -= event.movementX * FPS_MOUSE_SENSITIVITY;
     
-    // Update pitch (vertical rotation) with clamping to prevent flipping
     pitchRef.current -= event.movementY * FPS_MOUSE_SENSITIVITY;
     pitchRef.current = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitchRef.current));
   }, []);
@@ -581,15 +636,12 @@ export function VoxelCanvas({
       isPointerLockedRef.current = locked;
       setIsPointerLocked(locked);
       
-      // Hide preview mesh while in FPS mode with pointer lock
       if (previewMeshRef.current) {
         previewMeshRef.current.visible = !locked && cameraModeRef.current === 'orbit';
       }
       
-      // Reset velocity when exiting pointer lock
       if (!locked) {
         velocityRef.current.set(0, 0, 0);
-        // Reset movement state
         moveStateRef.current = {
           forward: false,
           backward: false,
