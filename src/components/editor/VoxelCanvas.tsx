@@ -220,6 +220,21 @@ export function VoxelCanvas({
         camera.rotation.y = yawRef.current;
         camera.rotation.x = pitchRef.current;
         camera.rotation.z = 0;
+
+        // Update preview mesh position in FPS mode
+        if (previewMeshRef.current && selectedBlockId) {
+          const intersection = getFPSIntersection();
+          if (intersection) {
+            previewMeshRef.current.visible = true;
+            previewMeshRef.current.position.set(
+              intersection.gridX - WORLD_SIZE / 2 + 0.5,
+              intersection.gridY + 0.5,
+              intersection.gridZ - WORLD_SIZE / 2 + 0.5
+            );
+          } else {
+            previewMeshRef.current.visible = false;
+          }
+        }
       }
       
       renderer.render(scene, camera);
@@ -236,6 +251,72 @@ export function VoxelCanvas({
       renderer.dispose();
     };
   }, []);
+
+  // Get intersection for FPS mode (center of screen)
+  const getFPSIntersection = useCallback(() => {
+    if (!sceneRef.current || !cameraRef.current) return null;
+
+    // Raycast from center of screen for FPS mode
+    const raycaster = new THREE.Raycaster();
+    const camera = cameraRef.current;
+    
+    // Cast ray from camera position forward
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(camera.quaternion);
+    raycaster.set(camera.position, direction);
+
+    const objects = sceneRef.current.children.filter(
+      obj => obj.name === 'block' || obj.name === 'ground'
+    );
+    const intersects = raycaster.intersectObjects(objects, false);
+
+    if (intersects.length > 0) {
+      const intersect = intersects[0];
+      const point = intersect.point.clone();
+      const normal = intersect.face?.normal.clone() || new THREE.Vector3(0, 1, 0);
+      
+      // Calculate grid position
+      let gridX: number, gridY: number, gridZ: number;
+      
+      if (intersect.object.name === 'ground') {
+        gridX = Math.floor(point.x + WORLD_SIZE / 2);
+        gridY = 0;
+        gridZ = Math.floor(point.z + WORLD_SIZE / 2);
+      } else {
+        // Place on face of existing block
+        const pos = intersect.object.position.clone();
+        normal.transformDirection(intersect.object.matrixWorld);
+        
+        gridX = Math.floor(pos.x + normal.x + WORLD_SIZE / 2);
+        gridY = Math.floor(pos.y + normal.y - 0.5);
+        gridZ = Math.floor(pos.z + normal.z + WORLD_SIZE / 2);
+      }
+
+      return { 
+        gridX, 
+        gridY, 
+        gridZ, 
+        isBlock: intersect.object.name === 'block',
+        blockKey: intersect.object.userData.blockKey,
+      };
+    }
+
+    return null;
+  }, []);
+
+  // Handle FPS mouse click
+  const handleFPSMouseDown = useCallback((event: MouseEvent) => {
+    if (!isPointerLockedRef.current) return;
+    
+    const intersection = getFPSIntersection();
+    
+    if (event.button === 0 && intersection) { // Left click - place
+      onPlaceBlock(intersection.gridX, intersection.gridY, intersection.gridZ);
+    } else if (event.button === 2 && intersection && intersection.isBlock) { // Right click - remove
+      const [x, y, z] = keyToPosition(intersection.blockKey);
+      onRemoveBlock(x, y, z);
+    }
+  }, [getFPSIntersection, onPlaceBlock, onRemoveBlock]);
 
   // Update camera mode
   useEffect(() => {
@@ -270,11 +351,6 @@ export function VoxelCanvas({
       
       // Reset velocity
       velocityRef.current.set(0, 0, 0);
-      
-      // Hide preview mesh
-      if (previewMeshRef.current) {
-        previewMeshRef.current.visible = false;
-      }
     }
   }, [cameraMode]);
 
@@ -339,7 +415,7 @@ export function VoxelCanvas({
     });
   }, [blockMap, version]);
 
-  // Get intersection point for block placement
+  // Get intersection point for block placement (orbit mode)
   const getIntersection = useCallback((event: MouseEvent | React.MouseEvent) => {
     if (!containerRef.current || !sceneRef.current || !cameraRef.current) return null;
 
@@ -388,15 +464,10 @@ export function VoxelCanvas({
     return null;
   }, []);
 
-  // Handle mouse move for preview - disabled in FPS mode
+  // Handle mouse move for preview - orbit mode only
   const handleMouseMove = useCallback((event: MouseEvent) => {
-    // Disable editor interactions while in FPS mode or pointer locked
-    if (cameraModeRef.current === 'fps' || isPointerLockedRef.current) {
-      if (previewMeshRef.current) {
-        previewMeshRef.current.visible = false;
-      }
-      return;
-    }
+    // Only handle in orbit mode
+    if (cameraModeRef.current !== 'orbit') return;
     
     const intersection = getIntersection(event);
     
@@ -421,12 +492,10 @@ export function VoxelCanvas({
     }
   }, [getIntersection, onPlaceBlock]);
 
-  // Handle mouse down - disabled in FPS mode
+  // Handle mouse down - orbit mode only
   const handleMouseDown = useCallback((event: MouseEvent) => {
-    // Disable editor interactions while in FPS mode or pointer locked
-    if (cameraModeRef.current === 'fps' || isPointerLockedRef.current) {
-      return;
-    }
+    // Only handle in orbit mode
+    if (cameraModeRef.current !== 'orbit') return;
     
     if (event.button === 0) {
       isMouseDownRef.current = true;
@@ -538,16 +607,24 @@ export function VoxelCanvas({
       }
     };
 
+    const handleMouseDownLock = (event: MouseEvent) => {
+      if (isPointerLockedRef.current) {
+        handleFPSMouseDown(event);
+      }
+    };
+
     document.addEventListener('pointerlockchange', handleLockChange);
     document.addEventListener('mousemove', handleMouseMoveLock);
+    document.addEventListener('mousedown', handleMouseDownLock);
 
     return () => {
       document.removeEventListener('pointerlockchange', handleLockChange);
+      document.removeEventListener('mousedown', handleMouseDownLock);
       document.removeEventListener('mousemove', handleMouseMoveLock);
     };
-  }, [handlePointerLockMove]);
+  }, [handlePointerLockMove, handleFPSMouseDown]);
 
-  // Regular event listeners
+  // Regular event listeners for orbit mode
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -570,6 +647,25 @@ export function VoxelCanvas({
       className="w-full h-full cursor-crosshair"
       onClick={handleClick}
     >
+      {/* Crosshair overlay for FPS mode */}
+      {isPointerLocked && (
+        <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
+          <div className="relative">
+            {/* Center dot */}
+            <div className="w-1 h-1 bg-cyan-500 rounded-full"></div>
+            {/* Cross lines */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+              {/* Horizontal line */}
+              <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-8 h-0.5 bg-cyan-500"></div>
+              {/* Vertical line */}
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-0.5 h-8 bg-cyan-500"></div>
+              {/* Outer circle */}
+              <div className="absolute -left-2 -top-2 w-4 h-4 border border-cyan-500 rounded-full opacity-50"></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {cameraMode === 'fps' && !isPointerLocked && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
           <div className="editor-panel p-6 text-center animate-scale-in">
@@ -577,7 +673,9 @@ export function VoxelCanvas({
               <div className="w-2 h-2 bg-primary rounded-full" />
             </div>
             <p className="text-foreground font-medium">Click to enable FPS controls</p>
-            <p className="text-sm text-muted-foreground mt-1">Press ESC to exit</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Press ESC to exit • LMB Place • RMB Remove
+            </p>
           </div>
         </div>
       )}
