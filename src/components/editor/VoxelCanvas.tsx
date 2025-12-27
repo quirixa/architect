@@ -647,22 +647,10 @@ export function VoxelCanvas({
       className="w-full h-full cursor-crosshair"
       onClick={handleClick}
     >
-      {/* Crosshair overlay for FPS mode */}
+      {/* Cyan dot crosshair overlay for FPS mode */}
       {isPointerLocked && (
         <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center">
-          <div className="relative">
-            {/* Center dot */}
-            <div className="w-1 h-1 bg-cyan-500 rounded-full"></div>
-            {/* Cross lines */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-              {/* Horizontal line */}
-              <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-8 h-0.5 bg-cyan-500"></div>
-              {/* Vertical line */}
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-0.5 h-8 bg-cyan-500"></div>
-              {/* Outer circle */}
-              <div className="absolute -left-2 -top-2 w-4 h-4 border border-cyan-500 rounded-full opacity-50"></div>
-            </div>
-          </div>
+          <div className="w-2 h-2 bg-cyan-500 rounded-full shadow-lg shadow-cyan-500/50"></div>
         </div>
       )}
 
