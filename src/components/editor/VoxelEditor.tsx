@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { VoxelCanvas } from './VoxelCanvas';
+import { VoxelCanvas, DebugInfo } from './VoxelCanvas'; // Import DebugInfo type
 import { Hotbar } from './Hotbar';
 import { BlockInventory } from './BlockInventory';
 import { EditorControls } from './EditorControls';
@@ -26,15 +26,17 @@ export function VoxelEditor() {
   const [hotbarSlots, setHotbarSlots] = useState<number[]>(DEFAULT_HOTBAR);
   const [selectedHotbarIndex, setSelectedHotbarIndex] = useState(0);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('orbit');
+  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit' | 'player'>('orbit');
   const [showGrid, setShowGrid] = useState(true);
   
-  // Add debug state
-  const [debugInfo, setDebugInfo] = useState({
+  // Add debug state with DebugInfo type
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     fps: 0,
     triangles: 0,
     geometries: 0,
-    cameraPosition: { x: 0, y: 0, z: 0 }
+    cameraPosition: { x: 0, y: 0, z: 0 },
+    isGrounded: false,
+    velocity: { x: 0, y: 0, z: 0 }
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +110,15 @@ export function VoxelEditor() {
     }
   }, [clearWorld]);
 
+  // Toggle camera mode between orbit → fps → player → orbit
+  const toggleCameraMode = useCallback(() => {
+    setCameraMode(prev => {
+      if (prev === 'orbit') return 'fps';
+      if (prev === 'fps') return 'player';
+      return 'orbit';
+    });
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -126,7 +137,7 @@ export function VoxelEditor() {
           setShowGrid(prev => !prev);
           break;
         case 'KeyC':
-          setCameraMode(prev => prev === 'fps' ? 'orbit' : 'fps');
+          toggleCameraMode();
           break;
         case 'Escape':
           setIsInventoryOpen(false);
@@ -136,7 +147,7 @@ export function VoxelEditor() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [toggleCameraMode]);
 
   return (
     <div className="w-full h-screen bg-editor-bg relative overflow-hidden">
@@ -158,7 +169,7 @@ export function VoxelEditor() {
         cameraMode={cameraMode}
         onPlaceBlock={handlePlaceBlock}
         onRemoveBlock={handleRemoveBlock}
-        onDebugInfoUpdate={setDebugInfo} // Add this prop
+        onDebugInfoUpdate={setDebugInfo}
       />
 
       {/* Editor Controls */}
@@ -166,14 +177,14 @@ export function VoxelEditor() {
         blockCount={getBlockCount()}
         cameraMode={cameraMode}
         showGrid={showGrid}
-        onToggleCameraMode={() => setCameraMode(prev => prev === 'fps' ? 'orbit' : 'fps')}
+        onToggleCameraMode={toggleCameraMode}
         onToggleGrid={() => setShowGrid(prev => !prev)}
         onExport={handleExport}
         onImport={handleImport}
         onClear={handleClear}
       />
 
-      {/* Debug Panel - Add this */}
+      {/* Debug Panel */}
       <div className="fixed top-5 right-4 z-40">
         <DebugPanel debugInfo={debugInfo} />
       </div>

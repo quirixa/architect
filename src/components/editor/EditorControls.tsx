@@ -3,22 +3,20 @@ import {
   Download, 
   Upload, 
   Trash2, 
-  Eye, 
   Grid3X3, 
-  Move, 
   MousePointer2,
   Keyboard,
   ChevronDown,
   ChevronUp,
-  Box
+  Box,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface EditorControlsProps {
   blockCount: number;
-  cameraMode: 'fps' | 'orbit';
+  cameraMode: 'fps'; // Only FPS mode now
   showGrid: boolean;
-  onToggleCameraMode: () => void;
+  onToggleCameraMode: () => void; // Can be removed or kept for future expansion
   onToggleGrid: () => void;
   onExport: () => void;
   onImport: () => void;
@@ -27,7 +25,7 @@ interface EditorControlsProps {
 
 export function EditorControls({
   blockCount,
-  cameraMode,
+  cameraMode, // Always 'fps'
   showGrid,
   onToggleCameraMode,
   onToggleGrid,
@@ -50,26 +48,11 @@ export function EditorControls({
           </div>
         </div>
 
-        {/* Camera Mode Toggle */}
-        <button
-          onClick={onToggleCameraMode}
-          className={cn(
-            'editor-button flex items-center gap-2',
-            cameraMode === 'fps' && 'border-primary/50 bg-primary/10'
-          )}
-        >
-          {cameraMode === 'fps' ? (
-            <>
-              <MousePointer2 className="w-4 h-4" />
-              <span className="text-sm">FPS Camera</span>
-            </>
-          ) : (
-            <>
-              <Move className="w-4 h-4" />
-              <span className="text-sm">Orbit Camera</span>
-            </>
-          )}
-        </button>
+        {/* Camera Mode - Only FPS Mode */}
+        <div className="editor-button flex items-center gap-2 border-primary/50 bg-primary/10">
+          <MousePointer2 className="w-4 h-4" />
+          <span className="text-sm">FPS Mode</span>
+        </div>
 
         {/* Grid Toggle */}
         <button
@@ -123,20 +106,20 @@ export function EditorControls({
                 <span className="font-mono text-primary">WASD</span>
                 <span className="text-muted-foreground">Move</span>
                 
-                <span className="font-mono text-primary">Space/Shift</span>
-                <span className="text-muted-foreground">Up/Down</span>
+                <span className="font-mono text-primary">Space</span>
+                <span className="text-muted-foreground">Up</span>
+                
+                <span className="font-mono text-primary">Shift</span>
+                <span className="text-muted-foreground">Down</span>
                 
                 <span className="font-mono text-primary">Mouse</span>
-                <span className="text-muted-foreground">Look (FPS)</span>
+                <span className="text-muted-foreground">Look</span>
                 
                 <span className="font-mono text-primary">LMB</span>
                 <span className="text-muted-foreground">Place Block</span>
                 
                 <span className="font-mono text-primary">RMB</span>
                 <span className="text-muted-foreground">Remove Block</span>
-                
-                <span className="font-mono text-primary">LMB Drag</span>
-                <span className="text-muted-foreground">Place Multiple</span>
                 
                 <span className="font-mono text-primary">1-9</span>
                 <span className="text-muted-foreground">Select Hotbar</span>
@@ -147,11 +130,8 @@ export function EditorControls({
                 <span className="font-mono text-primary">G</span>
                 <span className="text-muted-foreground">Toggle Grid</span>
                 
-                <span className="font-mono text-primary">C</span>
-                <span className="text-muted-foreground">Toggle Camera</span>
-                
-                <span className="font-mono text-primary">Scroll</span>
-                <span className="text-muted-foreground">Zoom (Orbit)</span>
+                <span className="font-mono text-primary">ESC</span>
+                <span className="text-muted-foreground">Exit FPS</span>
               </div>
             </div>
           )}
